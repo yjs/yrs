@@ -329,7 +329,7 @@ impl<'a> Transaction<'a> {
             let ds2 = self.apply_delete(&pending);
             let ds = match (ds, ds2) {
                 (Some(mut a), Some(b)) => {
-                    a.merge(b);
+                    a.merge(&b);
                     Some(a)
                 }
                 (Some(x), _) | (_, Some(x)) => Some(x),

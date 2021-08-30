@@ -77,7 +77,7 @@ impl PartialEq for BlockPtr {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Block {
     Item(Item),
     Skip(Skip),
@@ -91,6 +91,15 @@ impl Block {
             Block::Skip(skip) => ID::new(skip.id.client, skip.id.clock + skip.len),
             Block::GC(gc) => ID::new(gc.id.client, gc.id.clock + gc.len),
         }
+    }
+
+    pub fn slice(&self, offset: u32) -> Self {
+        match self {
+            Block::Item(item) => Block::Item(item.slice(offset)),
+            Block::Skip(skip) => Block::Skip(Skip { id: ID { client: skip.id.client, clock: skip.id.clock + offset }, len: skip.len - offset }),
+            Block::GC(gc) => Block::GC(GC { id: ID { client: gc.id.client, clock: gc.id.clock + offset }, len: gc.len })
+        }
+
     }
 
     pub fn as_item(&self) -> Option<&Item> {
@@ -279,6 +288,18 @@ impl Block {
             _ => false,
         }
     }
+
+    pub fn is_skip(&self) -> bool {
+        if let Block::Skip(_) = self { true } else { false }
+    }
+
+    pub fn is_gc(&self) -> bool {
+        if let Block::GC(_) = self { true } else { false }
+    }
+
+    pub fn is_item(&self) -> bool {
+        if let Block::Item(_) = self { true } else { false }
+    }
 }
 
 #[derive(Debug)]
@@ -294,7 +315,7 @@ const ITEM_FLAG_DELETED: u8 = 0b0100;
 const ITEM_FLAG_COUNTABLE: u8 = 0b0010;
 const ITEM_FLAG_KEEP: u8 = 0b0001;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Item {
     pub id: ID,
     pub left: Option<BlockPtr>,
@@ -307,7 +328,7 @@ pub struct Item {
     pub info: Cell<u8>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Skip {
     pub id: ID,
     pub len: u32,
@@ -323,7 +344,7 @@ impl Skip {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GC {
     pub id: ID,
     pub len: u32,
@@ -625,6 +646,26 @@ impl Item {
         self.content.len()
     }
 
+    pub fn slice (&self, diff: u32) -> Item {
+        if diff == 0 {
+            self.clone()
+        } else {
+            let client = self.id.client;
+            let clock = self.id.clock;
+            Item {
+                id: ID::new(client, clock + diff),
+                left: Some(BlockPtr::from(ID::new(client, clock + diff - 1))),
+                right: self.right.clone(),
+                origin: Some(ID::new(client, clock + diff - 1)),
+                right_origin: self.right_origin.clone(),
+                content: self.content.clone().splice(diff as usize).unwrap(),
+                parent: self.parent.clone(),
+                parent_sub: self.parent_sub.clone(),
+                info: self.info.clone(),
+            }
+        }
+    }
+
     pub fn split(&mut self, diff: u32) -> Item {
         let client = self.id.client;
         let clock = self.id.clock;
@@ -719,7 +760,7 @@ impl Item {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ItemContent {
     Any(Vec<Any>),
     Binary(Vec<u8>),

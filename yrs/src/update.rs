@@ -16,12 +16,35 @@ use std::rc::Rc;
 
 type ClientBlocks = HashMap<u64, VecDeque<Block>, BuildHasherDefault<ClientHasher>>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Update {
     clients: ClientBlocks,
 }
 
 impl Update {
+    pub fn new () -> Self {
+        Self::default()
+    }
+    /**
+     @todo this should be refactored.
+     I'm currently using this to add blocks to the Update
+     */
+    pub fn add_block (&mut self, block: &Block, offset: u32) {
+        let copy = block.slice(offset);
+        match self.clients.entry(copy.id().client) {
+            Entry::Occupied(e) => {
+                e.into_mut().push_back(copy)
+            }
+            Entry::Vacant(e) => {
+                let mut q = VecDeque::new();
+                q.push_back(copy);
+                e.insert(q);
+            }
+        }
+    }
+    pub fn is_empty (&self) -> bool {
+        self.clients.len() == 0
+    }
     pub fn state_vector(&self) -> StateVector {
         let mut sv = StateVector::default();
         for (&client, blocks) in self.clients.iter() {
@@ -39,9 +62,11 @@ impl Update {
 
     pub fn merge(&mut self, other: Self) {
         for (client, other_blocks) in other.clients {
+            println!("{:?}", other_blocks);
             match self.clients.entry(client) {
                 Entry::Occupied(e) => {
                     let mut blocks = e.into_mut();
+                    println!("{:?}", blocks);
 
                     let mut i2 = other_blocks.into_iter();
                     let mut n2 = i2.next();
@@ -295,8 +320,10 @@ impl Update {
                     }
                 } else {
                     let parent = if let Some(id) = origin.as_ref() {
+                        // @TODO: this should return origin.parent, not the origin
                         id.clone()
                     } else if let Some(id) = right_origin.as_ref() {
+                        // @TODO: this should return origin.parent, not the origin
                         id.clone()
                     } else {
                         panic!(
@@ -451,25 +478,27 @@ impl Into<Store> for Update {
 }
 
 pub struct Blocks<'a> {
-    current_client: std::collections::hash_map::Iter<'a, u64, VecDeque<Block>>,
+    current_client: std::vec::IntoIter<(&'a u64, &'a VecDeque<Block>)>,
     current_block: Option<std::collections::vec_deque::Iter<'a, Block>>,
+    pub current: Option<&'a Block>,
 }
 
 impl<'a> Blocks<'a> {
     fn new(update: &'a Update) -> Self {
-        let mut current_client = update.clients.iter();
+        let mut client_blocks: Vec<(&'a u64, &'a VecDeque<Block>)> = update.clients.iter().collect();
+        // sorting to return higher client ids first
+        client_blocks.sort_by(|a, b| b.0.cmp(a.0));
+        let mut current_client = client_blocks.into_iter();
+
         let current_block = current_client.next().map(|(_, v)| v.iter());
         Blocks {
             current_client,
             current_block,
+            current: None
         }
     }
-}
 
-impl<'a> Iterator for Blocks<'a> {
-    type Item = &'a Block;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn _next(&mut self) -> Option<&'a Block> {
         if let Some(blocks) = self.current_block.as_mut() {
             let block = blocks.next();
             if block.is_some() {
@@ -483,6 +512,15 @@ impl<'a> Iterator for Blocks<'a> {
         } else {
             None
         }
+    }
+}
+
+impl<'a> Iterator for Blocks<'a> {
+    type Item = &'a Block;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.current = self._next();
+        self.current
     }
 }
 

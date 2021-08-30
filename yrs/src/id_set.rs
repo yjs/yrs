@@ -275,9 +275,9 @@ impl IdSet {
         self.0.insert(client, range);
     }
 
-    pub fn merge(&mut self, other: Self) {
-        for (client, range) in other.0 {
-            match self.0.entry(client) {
+    pub fn merge(&mut self, other: &Self) {
+        other.0.iter().for_each(|(client, range)| {
+            match self.0.entry(*client) {
                 Entry::Occupied(mut e) => {
                     let r = e.get_mut();
                     match (r, range) {
@@ -304,11 +304,10 @@ impl IdSet {
                     }
                 }
                 Entry::Vacant(e) => {
-                    e.insert(range);
+                    e.insert(range.clone());
                 }
             }
-        }
-
+        });
         self.compact()
     }
 }
@@ -432,8 +431,8 @@ impl DeleteSet {
         self.0.iter()
     }
 
-    pub fn merge(&mut self, other: Self) {
-        self.0.merge(other.0)
+    pub fn merge(&mut self, other: &Self) {
+        self.0.merge(&other.0)
     }
 
     pub fn compact(&mut self) {

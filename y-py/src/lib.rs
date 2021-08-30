@@ -7,9 +7,12 @@ use yrs;
 #[pyfunction]
 pub fn merge_updates(updates: Vec<Vec<u8>>) -> PyResult<Py<PyAny>> {
     // Converts a Vec<Vec<u8>>  into a   [&[u8]]
+    println!("updates {:?}", updates);
     let updates_u8: Vec<&[u8]> = updates.iter().map(|x| &x[..]).collect();
+    println!("updates {:?}", updates_u8);
 
     let result = yrs::merge_updates(&updates_u8);
+    println!("result {:?}", result);
 
     let gil = Python::acquire_gil();
     let py = gil.python();
