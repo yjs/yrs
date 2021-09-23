@@ -6,7 +6,7 @@ const ITERATIONS: u32 = 1000000;
 fn ytext_prepend() {
     let doc = Doc::new();
     let tr = &mut doc.transact();
-    let t = doc.get_text(tr, "");
+    let t = tr.get_text("");
     for _ in 0..ITERATIONS {
         t.insert(tr, 0, "a")
     }
@@ -15,7 +15,7 @@ fn ytext_prepend() {
 fn ytext_append() {
     let doc = Doc::new();
     let tr = &mut doc.transact();
-    let t = doc.get_text(tr, "");
+    let t = tr.get_text("");
     for i in 0..6000 {
         t.insert(tr, i, "a")
     }

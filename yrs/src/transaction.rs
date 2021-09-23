@@ -48,6 +48,17 @@ impl<'a> Transaction<'a> {
         }
     }
 
+    /// Returns state vector describing current state of the updates.
+    pub fn state_vector(&self) -> StateVector {
+        self.store.blocks.get_state_vector()
+    }
+
+    /// Encodes the difference between remove peer state given its `state_vector` and the state
+    /// of a current local peer  
+    pub fn encode_diff<E: Encoder>(&self, state_vector: &StateVector, encoder: &mut E) {
+        self.store.encode_diff(state_vector, encoder)
+    }
+
     /// Returns a [Text] data structure stored under a given `name`. Text structures are used for
     /// collaborative text editing: they expose operations to append and remove chunks of text,
     /// which are free to execute concurrently by multiple peers over remote boundaries.

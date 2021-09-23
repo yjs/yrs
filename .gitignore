@@ -5,3 +5,5 @@ pkg
 .idea
 .DS_Store
 .vscode/
+cmake-build-debug/
+ffi-tests/lib

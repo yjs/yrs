@@ -1,8 +1,5 @@
 use crate::block::{Item, ItemContent, ItemPosition, Prelim};
-use crate::types::{
-    Branch, BranchRef, Entries, Map, Text, TypePtr, Value, TYPE_REFS_XML_ELEMENT,
-    TYPE_REFS_XML_TEXT,
-};
+use crate::types::{Branch, BranchRef, Entries, Map, Text, TypePtr, Value, TYPE_REFS_XML_ELEMENT, TYPE_REFS_XML_TEXT, TYPE_REFS_XML_FRAGMENT};
 use crate::Transaction;
 use lib0::any::Any;
 use std::cell::Ref;
@@ -28,8 +25,18 @@ impl From<BranchRef> for Xml {
 }
 
 /// XML element data type. It represents an XML node, which can contain key-value attributes
-/// (interpreted as strings) as well as other nested XML elements or plain text (represented by
+/// (interpreted as strings) as well as other nested XML elements or rich text (represented by
 /// [XmlText] type).
+///
+/// In terms of conflict resolution, [XmlElement] uses following rules:
+///
+/// - Attribute updates use logical last-write-wins principle, meaning the past updates are
+///   automatically overridden and discarded by newer ones, while concurrent updates made by
+///   different peers are resolved into a single value using document id seniority to establish
+///   an order.
+/// - Child node insertion uses sequencing rules from other Yrs collections - elements are inserted
+///   using interleave-resistant algorithm, where order of concurrent inserts at the same index
+///   is established using peer's document id seniority.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct XmlElement(XmlFragment);
 
@@ -212,7 +219,7 @@ impl XmlElement {
     /// Removes a range (defined by `len`) of XML nodes from the current XML element, starting at
     /// the given `index`. Returns the result which may contain an error if a number of elements
     /// removed is lesser than the expected one provided in `len` parameter.
-    pub fn remove(&self, txn: &mut Transaction, index: u32, len: u32) {
+    pub fn remove_range(&self, txn: &mut Transaction, index: u32, len: u32) {
         self.0.remove(txn, index, len)
     }
 
@@ -434,7 +441,7 @@ impl<'a, 'txn> Iterator for TreeWalker<'a, 'txn> {
                         let inner = t.borrow();
                         let type_ref = inner.type_ref();
                         if !current.is_deleted()
-                            && (type_ref == TYPE_REFS_XML_ELEMENT || type_ref == TYPE_REFS_XML_TEXT)
+                            && (type_ref == TYPE_REFS_XML_ELEMENT || type_ref == TYPE_REFS_XML_FRAGMENT)
                             && inner.start.is_some()
                         {
                             // walk down in the tree
@@ -513,7 +520,7 @@ impl XmlHook {
     pub fn iter<'a, 'b, 'txn>(
         &self,
         txn: &'b Transaction<'txn>,
-    ) -> crate::types::map::Iter<'b, 'txn> {
+    ) -> crate::types::map::MapIter<'b, 'txn> {
         self.0.iter(txn)
     }
 
@@ -550,8 +557,22 @@ impl Into<XmlHook> for Map {
     }
 }
 
-/// A XML node that represent a raw text stored inside of a [XmlElement]. It has collaborative,
-/// conflict-free features of a [Text] data type.
+/// A shared data type used for collaborative text editing, that can be used in a context of
+/// [XmlElement] nodee. It enables multiple users to add and remove chunks of text in efficient
+/// manner. This type is internally represented as a mutable double-linked list of text chunks
+/// - an optimization occurs during [Transaction::commit], which allows to squash multiple
+/// consecutively inserted characters together as a single chunk of text even between transaction
+/// boundaries in order to preserve more efficient memory model.
+///
+/// Just like [XmlElement], [XmlText] can be marked with extra metadata in form of attributes.
+///
+/// [XmlText] structure internally uses UTF-8 encoding and its length is described in a number of
+/// bytes rather than individual characters (a single UTF-8 code point can consist of many bytes).
+///
+/// Like all Yrs shared data types, [XmlText] is resistant to the problem of interleaving (situation
+/// when characters inserted one after another may interleave with other peers concurrent inserts
+/// after merging all updates together). In case of Yrs conflict resolution is solved by using
+/// unique document id to determine correct and consistent ordering.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct XmlText(Text);
 
@@ -644,7 +665,7 @@ impl XmlText {
     /// Removes a number of characters specified by a `len` parameter from this XML text structure,
     /// starting at given `index`.
     /// This method may panic if `index` if greater than a length of this text.
-    pub fn remove(&self, txn: &mut Transaction, index: u32, len: u32) {
+    pub fn remove_range(&self, txn: &mut Transaction, index: u32, len: u32) {
         self.0.remove_range(txn, index, len)
     }
 }

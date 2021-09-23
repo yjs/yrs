@@ -29,3 +29,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --verbose
+
+      - name: Generate C bindings
+        run: cargo install cbindgen & cbindgen --config ./yrs-api-wrapper/cbindgen.toml --crate yrs-api-wrapper --output ./ffi-tests/include/libyrs.h

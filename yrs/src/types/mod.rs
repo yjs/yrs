@@ -50,7 +50,7 @@ pub const TYPE_REFS_UNDEFINED: TypeRefs = 7;
 pub struct BranchRef(Rc<RefCell<Branch>>);
 
 impl BranchRef {
-    pub(crate) fn new(inner: Branch) -> Self {
+    pub fn new(inner: Branch) -> Self {
         BranchRef(Rc::new(RefCell::new(inner)))
     }
 
@@ -232,7 +232,7 @@ pub struct Branch {
 }
 
 impl Branch {
-    pub(crate) fn new(ptr: TypePtr, type_ref: TypeRefs, name: Option<String>) -> Self {
+    pub fn new(ptr: TypePtr, type_ref: TypeRefs, name: Option<String>) -> Self {
         Self {
             start: None,
             map: HashMap::default(),

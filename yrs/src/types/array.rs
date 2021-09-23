@@ -6,7 +6,24 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt::Formatter;
 
-/// A collection used to store data in an indexed sequence structure.
+/// A collection used to store data in an indexed sequence structure. This type is internally
+/// implemented as a double linked list, which may squash values inserted directly one after another
+/// into single list node upon transaction commit.
+///
+/// Reading a root-level type as an YArray means treating its sequence components as a list, where
+/// every countable element becomes an individual entity:
+///
+/// - JSON-like primitives (booleans, numbers, strings, JSON maps, arrays etc.) are counted
+///   individually.
+/// - Text chunks inserted by [Text] data structure: each character becomes an element of an
+///   array.
+/// - Embedded and binary values: they count as a single element even though they correspond of
+///   multiple bytes.
+///
+/// Like all Yrs shared data types, YArray is resistant to the problem of interleaving (situation
+/// when elements inserted one after another may interleave with other peers concurrent inserts
+/// after merging all updates together). In case of Yrs conflict resolution is solved by using
+/// unique document id to determine correct and consistent ordering.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Array(BranchRef);
 
@@ -96,8 +113,8 @@ impl Array {
 
     /// Returns an iterator, that can be used to lazely traverse over all values stored in a current
     /// array.
-    pub fn iter<'a, 'b, 'txn>(&'a self, txn: &'b Transaction<'txn>) -> Iter<'b, 'txn> {
-        Iter::new(self, txn)
+    pub fn iter<'a, 'b, 'txn>(&'a self, txn: &'b Transaction<'txn>) -> ArrayIter<'b, 'txn> {
+        ArrayIter::new(self, txn)
     }
 
     /// Converts all contents of current array into a JSON-like representation.
@@ -107,16 +124,16 @@ impl Array {
     }
 }
 
-pub struct Iter<'b, 'txn> {
+pub struct ArrayIter<'b, 'txn> {
     content: VecDeque<Value>,
     ptr: Option<BlockPtr>,
     txn: &'b Transaction<'txn>,
 }
 
-impl<'b, 'txn> Iter<'b, 'txn> {
+impl<'b, 'txn> ArrayIter<'b, 'txn> {
     fn new(array: &Array, txn: &'b Transaction<'txn>) -> Self {
         let inner = array.0.borrow();
-        Iter {
+        ArrayIter {
             ptr: inner.start,
             txn,
             content: VecDeque::default(),
@@ -124,7 +141,7 @@ impl<'b, 'txn> Iter<'b, 'txn> {
     }
 }
 
-impl<'b, 'txn> Iterator for Iter<'b, 'txn> {
+impl<'b, 'txn> Iterator for ArrayIter<'b, 'txn> {
     type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -152,8 +169,8 @@ impl From<BranchRef> for Array {
     }
 }
 
-/// A preliminary array. It's can be used to initialize an [Array], when it's about to be nested
-/// into another Yrs data collection, such as [Map] or another [Array].
+/// A preliminary array. It's can be used to initialize an YArray, when it's about to be nested
+/// into another Yrs data collection, such as [Map] or another YArray.
 pub struct PrelimArray<T, V>(T)
 where
     T: IntoIterator<Item = V>;

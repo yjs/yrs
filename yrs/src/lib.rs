@@ -24,20 +24,21 @@
 //! build them easily on your own.
 
 mod alt;
-mod block;
+pub mod block;
 mod block_store;
 mod doc;
 mod event;
 mod id_set;
 mod store;
 mod transaction;
-mod types;
+pub mod types;
 mod update;
-mod updates;
+pub mod updates;
 mod utils;
 
 #[cfg(test)]
 mod compatibility_tests;
+
 #[cfg(test)]
 mod test_utils;
 
@@ -45,6 +46,7 @@ pub use crate::alt::{diff_updates, encode_state_vector_from_update, merge_update
 pub use crate::block::ID;
 pub use crate::block_store::StateVector;
 pub use crate::doc::Doc;
+pub use crate::id_set::DeleteSet;
 pub use crate::transaction::Transaction;
 pub use crate::types::array::Array;
 pub use crate::types::array::PrelimArray;
@@ -54,3 +56,4 @@ pub use crate::types::text::Text;
 pub use crate::types::xml::Xml;
 pub use crate::types::xml::XmlElement;
 pub use crate::types::xml::XmlText;
+pub use crate::update::Update;

@@ -1,0 +1,184 @@
+language = "C"
+documentation = true
+
+header = """
+/**
+ * The MIT License (MIT)
+ *
+ *  Copyright (c) 2020
+ *    - Bartosz Sypytkowski <b.sypytkowski@gmail.com>
+ *    - Kevin Jahns <kevin.jahns@pm.me>.
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files (the "Software"), to deal
+ *  in the Software without restriction, including without limitation the rights
+ *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ *  copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions:
+ *
+ *  The above copyright notice and this permission notice shall be included in all
+ *  copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ *  SOFTWARE.
+ */
+
+#ifndef YRS_FFI_H
+#define YRS_FFI_H
+
+/**
+ * A Yrs document type. Documents are most important units of collaborative resources management.
+ * All shared collections live within a scope of their corresponding documents. All updates are
+ * generated on per document basis (rather than individual shared type). All operations on shared
+ * collections happen via `YTransaction`, which lifetime is also bound to a document.
+ *
+ * Document manages so called root types, which are top-level shared types definitions (as opposed
+ * to recursively nested types).
+ */
+typedef struct YDoc {} YDoc;
+
+/**
+ * A shared data type used for collaborative text editing. It enables multiple users to add and
+ * remove chunks of text in efficient manner. This type is internally represented as a mutable
+ * double-linked list of text chunks - an optimization occurs during [ytransaction_commit], which
+ * allows to squash multiple consecutively inserted characters together as a single chunk of text
+ * even between transaction boundaries in order to preserve more efficient memory model.
+ *
+ * `YText` structure internally uses UTF-8 encoding and its length is described in a number of
+ * bytes rather than individual characters (a single UTF-8 code point can consist of many bytes).
+ *
+ * Like all Yrs shared data types, `YText` is resistant to the problem of interleaving (situation
+ * when characters inserted one after another may interleave with other peers concurrent inserts
+ * after merging all updates together). In case of Yrs conflict resolution is solved by using
+ * unique document id to determine correct and consistent ordering.
+ */
+typedef struct YText {} YText;
+
+/**
+ * A collection used to store data in an indexed sequence structure. This type is internally
+ * implemented as a double linked list, which may squash values inserted directly one after another
+ * into single list node upon transaction commit.
+ *
+ * Reading a root-level type as an `YArray` means treating its sequence components as a list, where
+ * every countable element becomes an individual entity:
+ *
+ * - JSON-like primitives (booleans, numbers, strings, JSON maps, arrays etc.) are counted
+ *   individually.
+ * - Text chunks inserted by `YText` data structure: each character becomes an element of an
+ *   array.
+ * - Embedded and binary values: they count as a single element even though they correspond of
+ *   multiple bytes.
+ *
+ * Like all Yrs shared data types, `YArray` is resistant to the problem of interleaving (situation
+ * when elements inserted one after another may interleave with other peers concurrent inserts
+ * after merging all updates together). In case of Yrs conflict resolution is solved by using
+ * unique document id to determine correct and consistent ordering.
+ */
+typedef struct YArray {} YArray;
+
+/**
+ * Collection used to store key-value entries in an unordered manner. Keys are always represented
+ * as UTF-8 strings. Values can be any value type supported by Yrs: JSON-like primitives as well as
+ * shared data types.
+ *
+ * In terms of conflict resolution, `YMap` uses logical last-write-wins principle, meaning the past
+ * updates are automatically overridden and discarded by newer ones, while concurrent updates made
+ * by different peers are resolved into a single value using document id seniority to establish
+ * order.
+ */
+typedef struct YMap {} YMap;
+
+/**
+ * XML element data type. It represents an XML node, which can contain key-value attributes
+ * (interpreted as strings) as well as other nested XML elements or rich text (represented by
+ * `YXmlText` type).
+ *
+ * In terms of conflict resolution, `YXmlElement` uses following rules:
+ *
+ * - Attribute updates use logical last-write-wins principle, meaning the past updates are
+ *   automatically overridden and discarded by newer ones, while concurrent updates made by
+ *   different peers are resolved into a single value using document id seniority to establish
+ *   an order.
+ * - Child node insertion uses sequencing rules from other Yrs collections - elements are inserted
+ *   using interleave-resistant algorithm, where order of concurrent inserts at the same index
+ *   is established using peer's document id seniority.
+ */
+typedef struct YXmlElement {} YXmlElement;
+
+/**
+ * A shared data type used for collaborative text editing, that can be used in a context of
+ * `YXmlElement` nodee. It enables multiple users to add and remove chunks of text in efficient
+ * manner. This type is internally represented as a mutable double-linked list of text chunks
+ * - an optimization occurs during [ytransaction_commit], which allows to squash multiple
+ * consecutively inserted characters together as a single chunk of text even between transaction
+ * boundaries in order to preserve more efficient memory model.
+ *
+ * Just like `YXmlElement`, `YXmlText` can be marked with extra metadata in form of attributes.
+ *
+ * `YXmlText` structure internally uses UTF-8 encoding and its length is described in a number of
+ * bytes rather than individual characters (a single UTF-8 code point can consist of many bytes).
+ *
+ * Like all Yrs shared data types, `YXmlText` is resistant to the problem of interleaving (situation
+ * when characters inserted one after another may interleave with other peers concurrent inserts
+ * after merging all updates together). In case of Yrs conflict resolution is solved by using
+ * unique document id to determine correct and consistent ordering.
+ */
+typedef struct YXmlText {} YXmlText;
+
+/**
+ * Transaction is one of the core types in Yrs. All operations that need to touch a document's
+ * contents (a.k.a. block store), need to be executed in scope of a transaction.
+ */
+typedef struct YTransaction {} YTransaction;
+
+/**
+ * Iterator structure used by shared array data type.
+ */
+typedef struct YArrayIter {} YArrayIter;
+
+/**
+ * Iterator structure used by shared map data type. Map iterators are unordered - there's no
+ * specific order in which map entries will be returned during consecutive iterator calls.
+ */
+typedef struct YMapIter {} YMapIter;
+
+/**
+ * Iterator structure used by XML nodes (elements and text) to iterate over node's attributes.
+ * Attribute iterators are unordered - there's no specific order in which map entries will be
+ * returned during consecutive iterator calls.
+ */
+typedef struct YXmlAttrIter {} YXmlAttrIter;
+
+/**
+ * Iterator used to traverse over the complex nested tree structure of a XML node. XML node
+ * iterator walks only over `YXmlElement` and `YXmlText` nodes. It does so in ordered manner (using
+ * the order in which children are ordered within their parent nodes) and using **depth-first**
+ * traverse.
+ */
+typedef struct YXmlTreeWalker {} YXmlTreeWalker;
+"""
+
+trailer = """
+#endif
+"""
+
+[parse]
+parse_deps = false
+
+[export.rename]
+"Doc" = "YDoc"
+"Transaction" = "YTransaction"
+"Array" = "YArray"
+"Map" = "YMap"
+"Text" = "YText"
+"XmlElement" = "YXmlElement"
+"XmlText" = "YXmlText"
+"MapIter" = "YMapIter"
+"ArrayIter" = "YArrayIter"
+"TreeWalker" = "YXmlTreeWalker"
+"Attributes" = "YXmlAttrIter"

@@ -4,7 +4,14 @@ use crate::*;
 use lib0::any::Any;
 use std::collections::HashMap;
 
-/// Collection used to store key-value entries in an unordered manner.
+/// Collection used to store key-value entries in an unordered manner. Keys are always represented
+/// as UTF-8 strings. Values can be any value type supported by Yrs: JSON-like primitives as well as
+/// shared data types.
+///
+/// In terms of conflict resolution, [Map] uses logical last-write-wins principle, meaning the past
+/// updates are automatically overridden and discarded by newer ones, while concurrent updates made
+/// by different peers are resolved into a single value using document id seniority to establish
+/// order.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Map(BranchRef);
 
@@ -61,8 +68,8 @@ impl Map {
 
     /// Returns an iterator that enables to traverse over all entries - tuple of key-value pairs -
     /// stored within current map.
-    pub fn iter<'a, 'b, 'txn>(&'a self, txn: &'b Transaction<'txn>) -> Iter<'b, 'txn> {
-        Iter(self.entries(txn))
+    pub fn iter<'a, 'b, 'txn>(&'a self, txn: &'b Transaction<'txn>) -> MapIter<'b, 'txn> {
+        MapIter(self.entries(txn))
     }
 
     /// Inserts a new `value` under given `key` into current map. Returns a value stored previously
@@ -122,14 +129,18 @@ impl Map {
     }
 }
 
-pub struct Iter<'a, 'txn>(Entries<'a, 'txn>);
+pub struct MapIter<'a, 'txn>(Entries<'a, 'txn>);
 
-impl<'a, 'txn> Iterator for Iter<'a, 'txn> {
-    type Item = (&'a String, Vec<Value>);
+impl<'a, 'txn> Iterator for MapIter<'a, 'txn> {
+    type Item = (&'a String, Value);
 
     fn next(&mut self) -> Option<Self::Item> {
         let (key, item) = self.0.next()?;
-        Some((key, item.content.get_content(self.0.txn)))
+        if let Some(content) = item.content.get_content_last(self.0.txn) {
+            Some((key, content))
+        } else {
+            self.next()
+        }
     }
 }
 

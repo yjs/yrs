@@ -7,7 +7,18 @@ use std::error::Error;
 use std::fmt::Formatter;
 
 /// A shared data type used for collaborative text editing. It enables multiple users to add and
-/// remove chunks of text in efficient manner.
+/// remove chunks of text in efficient manner. This type is internally represented as a mutable
+/// double-linked list of text chunks - an optimization occurs during [Transaction::commit], which
+/// allows to squash multiple consecutively inserted characters together as a single chunk of text
+/// even between transaction boundaries in order to preserve more efficient memory model.
+///
+/// [Text] structure internally uses UTF-8 encoding and its length is described in a number of
+/// bytes rather than individual characters (a single UTF-8 code point can consist of many bytes).
+///
+/// Like all Yrs shared data types, [Text] is resistant to the problem of interleaving (situation
+/// when characters inserted one after another may interleave with other peers concurrent inserts
+/// after merging all updates together). In case of Yrs conflict resolution is solved by using
+/// unique document id to determine correct and consistent ordering.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Text(BranchRef);
 
@@ -112,57 +123,9 @@ impl Text {
     /// This method panics in case when not all expected characters were removed (due to
     /// insufficient number of characters to remove) or `index` is outside of the bounds of text.
     pub fn remove_range(&self, txn: &mut Transaction, index: u32, len: u32) {
-        let mut remaining = len;
-        if let Some(pos) = self.find_position(txn, index) {
-            let mut current = {
-                let block = pos
-                    .left
-                    .as_ref()
-                    .and_then(|ptr| txn.store.blocks.get_block(ptr));
-                match block {
-                    Some(block) => block
-                        .as_item()
-                        .and_then(|item| item.right.as_ref())
-                        .and_then(|ptr| txn.store.blocks.get_item(ptr)),
-                    None => {
-                        let t = txn.store.get_type(&pos.parent).unwrap();
-                        let inner = t.borrow();
-                        let ptr = inner.start.as_ref();
-                        let item = ptr.and_then(|ptr| txn.store.blocks.get_item(ptr));
-                        item
-                    }
-                }
-            };
-            while let Some(mut item) = current {
-                if remaining == 0 {
-                    break;
-                }
-                if !item.is_deleted() {
-                    if remaining < item.len() {
-                        // split item
-                        let mut split_ptr = BlockPtr::from(item.id);
-                        split_ptr.id.clock += remaining;
-                        let (left, _) = txn.store.blocks.split_block(&split_ptr);
-                        item = txn
-                            .store
-                            .blocks
-                            .get_block(left.as_ref().unwrap())
-                            .unwrap()
-                            .as_item()
-                            .unwrap();
-                    }
-
-                    remaining -= item.len();
-                    item.mark_as_deleted();
-                }
-                current = item
-                    .right
-                    .as_ref()
-                    .and_then(|ptr| txn.store.blocks.get_block(ptr))
-                    .and_then(|block| block.as_item());
-            }
-        } else {
-            panic!("Failed to remove characters starting at index {}. Index outside of the bounds of a text.", len);
+        let removed = self.0.remove_at(txn, index, len);
+        if removed != len {
+            panic!("Couldn't remove {} elements from an array. Only {} of them were successfully removed.", len, removed);
         }
     }
 }
@@ -382,6 +345,7 @@ mod test {
         txt.insert(&mut txn, 0, "aaa");
         txt.remove_range(&mut txn, 0, 3);
 
+        assert_eq!(txt.len(), 3);
         assert_eq!(txt.to_string(&txn).as_str(), "bbb");
     }
 
