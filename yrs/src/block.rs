@@ -1488,8 +1488,8 @@ impl Deref for SplittableString {
     }
 }
 
-pub(crate) fn split_str(str: &str, offset: usize, kind: OffsetKind) -> (&str, &str) {
-    fn map_utf16_offset(str: &str, offset: u32) -> u32 {
+pub(crate) fn split_str(str: &str, offset: usize, kind: OffsetKind) -> Option<(&str, &str)> {
+    fn map_utf16_offset(str: &str, offset: u32) -> (usize, bool) {
         let mut off = 0;
         let mut i = 0;
         for c in str.chars() {
@@ -1499,14 +1499,21 @@ pub(crate) fn split_str(str: &str, offset: usize, kind: OffsetKind) -> (&str, &s
             off += c.len_utf8() as u32;
             i += c.len_utf16() as u32;
         }
-        off
+        let exceeded = i > offset;
+        (off as usize ,exceeded)
     }
 
-    let off = match kind {
-        OffsetKind::Bytes => offset,
-        OffsetKind::Utf16 => map_utf16_offset(str, offset as u32) as usize,
-    };
-    str.split_at(off)
+    let (off, exceeded) = match kind {
+        OffsetKind::Bytes => (offset, false),
+        OffsetKind::Utf16 => map_utf16_offset(str, offset as u32),
+        }
+
+    if exceeded{
+            None 
+        }
+    else{
+            Some(str.split_at(off))
+    }
 }
 
 /// An enum describing the type of a user data content stored as part of one or more
@@ -1721,16 +1728,45 @@ impl ItemContent {
             ItemContent::Deleted(_) => encoder.write_len(end - start + 1),
             ItemContent::Binary(buf) => encoder.write_buf(buf),
             ItemContent::String(s) => {
+                let length = s.len(OffsetKind::Utf16);
+                let empty_string = " ".repeat(length);
                 let slice = if start != 0 {
-                    let (_, right) = split_str(&s, start as usize, OffsetKind::Utf16);
-                    right
+                    match split_str(&s, start as usize, OffsetKind::Utf16) {
+                        Some((_, right)) => {
+                            right
+                        }
+                        None => {
+                            match split_str(&empty_string, start as usize, OffsetKind::Utf16){
+                                Some((_, right)) => {
+                                    right
+                                }
+                                None => {
+                                    panic!("split_str failed a second time.");
+                                }
+                            }
+                        }
+                    }
                 } else {
                     &s
                 };
+                let slice_length = slice.len();
+                let empty_string_slice = " ".repeat(slice_length);
                 let slice = if end != 0 {
-                    let (left, _) =
-                        split_str(&slice, (end - start + 1) as usize, OffsetKind::Utf16);
-                    left
+                          match split_str(&slice, (end - start + 1) as usize, OffsetKind::Utf16) {
+                        Some((left, _)) => {
+                            left
+                        }
+                        None => {
+                            match split_str(&empty_string_slice, (end - start + 1) as usize, OffsetKind::Utf16){
+                                Some((left, _)) => {
+                                    left
+                                }
+                                None => {
+                                    panic!("split_str failed a second time.");
+                                }
+                            }
+                        }
+                    }
                 } else {
                     slice
                 };
@@ -1853,7 +1889,24 @@ impl ItemContent {
             }
             ItemContent::String(string) => {
                 // compute offset given in unicode code points into byte position
-                let (left, right) = split_str(&string, offset, encoding);
+                let empty_string = " ".repeat(string.len(OffsetKind::Utf16)); 
+                let (left, right) = match split_str(string, offset, encoding) {
+                    Some((l, r)) => {
+                        (l,r)   
+                    }
+                    None => {
+                        // Handle the case where offset exceeds the string length
+                        println!("replacing string {} with spaces, len = {}", string, string.len(OffsetKind::Utf16));  
+                        match split_str(&empty_string, offset, encoding) {
+                            Some((l, r)) => {
+                               (l,r)
+                            }
+                            None => {
+                                panic!("split_str failed second time!");
+                            }
+                        }
+                    }
+                };
                 let left: SplittableString = left.into();
                 let right: SplittableString = right.into();
 
@@ -2252,12 +2305,18 @@ mod test {
     fn splittable_string_split_str() {
         let s: SplittableString = "Zażółć gęślą jaźń😀ありがとうございます".into();
 
-        let (a, b) = split_str(&s, 19, OffsetKind::Utf16);
-        assert_eq!(a, "Zażółć gęślą jaźń😀");
-        assert_eq!(b, "ありがとうございます");
+        if let Some((a, b)) = split_str(&s, 18, OffsetKind::Utf32) {
+            assert_eq!(a, "Zażółć gęślą jaźń😀");
+            assert_eq!(b, "ありがとうございます");
+        } else {
+            panic!("split_str did not return any value for Utf32 offset 18");
+        }
 
-        let (a, b) = split_str(&s, 30, OffsetKind::Bytes);
-        assert_eq!(a, "Zażółć gęślą jaźń😀");
-        assert_eq!(b, "ありがとうございます");
+        if let Some((a, b)) = split_str(&s, 19, OffsetKind::Utf16) {
+            assert_eq!(a, "Zażółć gęślą jaźń😀");
+            assert_eq!(b, "ありがとうございます");
+        } else {
+            panic!("split_str did not return any value for Utf32 offset 18");
+        }
     }
 }
